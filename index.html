@@ -343,7 +343,7 @@ function nowTH(){
 async function sbQ(method,table,q={},body=null){
   const url=new URL(`${SUPA_URL}/rest/v1/${table}`);
   Object.entries(q).forEach(([k,v])=>url.searchParams.set(k,String(v)));
-  const h={'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'};
+  const h={'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json','Range':'0-4999'};
   if(method!=='GET') h['Prefer']='return=representation';
   const opts={method,headers:h};
   if(body!==null) opts.body=JSON.stringify(body);
@@ -3416,6 +3416,191 @@ function LoginPage({onLogin}){
 // ============================================================
 // ADMIN APP
 // ============================================================
+// ============================================================
+// ADMIN — AI ADVISOR (คัดเคสเร่งด่วน + วิเคราะห์ทีม)
+// ============================================================
+function AdminAIPage({currentUser}){
+  const [cases,setCases]=useState([]);
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [aiText,setAiText]=useState('');
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiDone,setAiDone]=useState(false);
+  const [tab,setTab]=useState('urgent');
+  const abortRef=useRef(null);
+
+  const CLOSED=['ปิดเคส','รีเจค','ปล่อยแล้ว','ได้รถจากที่อื่น','โยนเคส'];
+
+  const load=useCallback(()=>{
+    setLoading(true);
+    Promise.all([
+      api('getCases',{all:'true'}),
+      api('getUsers')
+    ]).then(([cr,ur])=>{
+      if(cr.success) setCases((cr.data||[]).filter(c=>!CLOSED.includes(c.status)));
+      if(ur.success) setUsers((ur.data||[]).filter(u=>u.role==='Sales'&&u.status==='active'));
+      setLoading(false);
+    });
+  },[]);
+  useEffect(()=>{load();},[load]);
+
+  function daysAgo(d){const s=String(d||'');const m=s.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)/);if(!m)return 0;const dt=new Date(parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1]),parseInt(m[4]),parseInt(m[5]));return Math.floor((Date.now()-dt.getTime())/86400000);}
+
+  async function streamAI(prompt, sys){
+    setAiLoading(true);setAiText('');setAiDone(false);
+    if(abortRef.current) abortRef.current.abort();
+    const ctrl=new AbortController();abortRef.current=ctrl;
+    try{
+      const res=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',signal:ctrl.signal,
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2000,stream:true,
+          system:sys||'คุณคือที่ปรึกษาผู้จัดการทีมขายรถยนต์ ให้คำแนะนำเป็นภาษาไทย กระชับ ตรงประเด็น ใช้ emoji',
+          messages:[{role:'user',content:prompt}]})
+      });
+      const reader=res.body.getReader();const dec=new TextDecoder();
+      while(true){const{done,value}=await reader.read();if(done)break;
+        for(const line of dec.decode(value).split('\n')){
+          if(!line.startsWith('data:'))continue;const d=line.slice(5).trim();if(d==='[DONE]')continue;
+          try{const j=JSON.parse(d);if(j.type==='content_block_delta'&&j.delta?.text)setAiText(t=>t+j.delta.text);}catch(e){}
+        }
+      }
+      setAiDone(true);
+    }catch(err){if(err.name!=='AbortError')setAiText(t=>t+(t?'\n\n':'')+'❌ Error: '+err.message);setAiDone(true);}
+    setAiLoading(false);
+  }
+
+  function buildTeamSummary(){
+    const d=new Date(),pre=String(d.getFullYear()).slice(-2)+String(d.getMonth()+1).padStart(2,'0');
+    return users.map(u=>{
+      const my=cases.filter(c=>c.sales===u.name);
+      const thisMonth=my.filter(c=>String(c.caseid||'').startsWith(pre));
+      const sold=thisMonth.filter(c=>c.status==='ปล่อยแล้ว').length;
+      const active=thisMonth.filter(c=>!CLOSED.includes(c.status)).length;
+      const stale=my.filter(c=>daysAgo(c.updatedat)>=2).length;
+      return `${u.name}: เคสเดือนนี้ ${thisMonth.length} | ปิดได้ ${sold} | active ${active} | ค้างนาน ${stale}`;
+    }).join('\n');
+  }
+
+  function buildUrgentSummary(){
+    // เอาเคส active ทั้งหมด เรียงตามความเร่งด่วน
+    const sorted=[...cases].sort((a,b)=>daysAgo(b.updatedat)-daysAgo(a.updatedat)).slice(0,50);
+    return sorted.map((c,i)=>
+      `${i+1}. [${c.caseid}] ${c.customername} | เซลส์: ${c.sales} | สถานะ: ${c.status} | ไม่อัปเดต: ${daysAgo(c.updatedat)} วัน | รีพอร์ต: ${(c.report||'ไม่มี').slice(0,80)}`
+    ).join('\n');
+  }
+
+  async function askAI(){
+    if(loading){setAiText('❌ กำลังโหลดข้อมูล กรุณารอสักครู่');setAiDone(true);return;}
+    if(tab==='urgent'){
+      await streamAI(
+        `ทีมขายรถยนต์มีเคส active ดังนี้ (เรียงตามไม่อัปเดตนานสุด):\n\n${buildUrgentSummary()}\n\n` +
+        `วิเคราะห์และบอก:\n1. 🚨 TOP 10 เคสที่ต้องติดตามด่วนที่สุด พร้อมเหตุผล\n2. ⚠️ pattern ที่น่าเป็นห่วงที่เห็น\n3. 💡 คำแนะนำให้ทีม`
+      );
+    } else if(tab==='performance'){
+      const d=new Date(),pre=String(d.getFullYear()).slice(-2)+String(d.getMonth()+1).padStart(2,'0');
+      const summary=buildTeamSummary();
+      await streamAI(
+        `สรุปผลงานทีมขายเดือนนี้ (${pre}):\n\n${summary}\n\n` +
+        `วิเคราะห์:\n1. 🏆 จัดอันดับ performance พร้อมเหตุผล\n2. 💪 จุดแข็งของแต่ละคน\n3. ⚠️ ใครต้องการความช่วยเหลือ\n4. 💡 คำแนะนำสำหรับผู้จัดการ`
+      );
+    } else if(tab==='winrate'){
+      const top=cases.filter(c=>['ไปต่อได้','จอง','รอเซ็นต์','รอผล','อนุมัติ'].includes(c.status)).slice(0,40);
+      const prompt=top.map((c,i)=>
+        `${i+1}. [${c.caseid}] ${c.customername} | เซลส์: ${c.sales} | สถานะ: ${c.status} | รีพอร์ต: ${(c.report||'ไม่มี').slice(0,80)}`
+      ).join('\n');
+      await streamAI(
+        `เคสที่มีสถานะดี ทั่วทั้งทีม:\n\n${prompt}\n\n` +
+        `ประเมิน Win Rate % ของแต่ละเคส จัดอันดับจากสูงสุด พร้อมบอกว่าเซลส์คนไหนควรได้รับการ support`
+      );
+    } else if(tab==='assign'){
+      const newCases=cases.filter(c=>c.status==='รอข้อมูล'&&daysAgo(c.updatedat)===0).slice(0,20);
+      const teamSummary=buildTeamSummary();
+      const newList=newCases.map((c,i)=>`${i+1}. [${c.caseid}] ${c.customername} | ปัจจุบัน: ${c.sales}`).join('\n');
+      await streamAI(
+        `ภาระงานทีมปัจจุบัน:\n${teamSummary}\n\nเคสใหม่วันนี้:\n${newList||'ไม่มีเคสใหม่วันนี้'}\n\n` +
+        `แนะนำว่าควร assign เคสใหม่เหล่านี้ให้ใครบ้าง พร้อมเหตุผล และถ้ามีเคสที่ assign ผิดคน ให้แนะนำด้วย`
+      );
+    }
+  }
+
+  const TABS=[['urgent','🚨 เร่งด่วน'],['performance','📊 Performance'],['winrate','🎯 Win Rate ทีม'],['assign','💡 แนะนำ Assign']];
+
+  return <div className="page">
+    <div className="page-hd">
+      <div><div className="page-title">🧠 AI Admin</div>
+        <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>
+          {loading?'กำลังโหลด...':`เคส active ${cases.length} ใบ · เซลส์ ${users.length} คน`}
+        </div>
+      </div>
+      <button className="btn btn-ghost" style={{fontSize:13}} onClick={load}>🔄</button>
+    </div>
+
+    {/* Tabs */}
+    <div style={{display:'flex',gap:6,marginBottom:16,overflowX:'auto',paddingBottom:4}}>
+      {TABS.map(([k,l])=>
+        <button key={k} onClick={()=>{setTab(k);setAiText('');setAiDone(false);}}
+          style={{padding:'7px 14px',borderRadius:20,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,whiteSpace:'nowrap',
+            background:tab===k?'var(--blue2)':'var(--bg3)',color:tab===k?'#fff':'var(--text2)',transition:'all .15s'}}>
+          {l}
+        </button>
+      )}
+    </div>
+
+    {/* Stats */}
+    {!loading&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:8,marginBottom:14}}>
+      {[
+        ['เคส Active',cases.length,'var(--blue)'],
+        ['ค้าง >2 วัน',cases.filter(c=>daysAgo(c.updatedat)>=2).length,'var(--yellow)'],
+        ['ค้าง >3 วัน',cases.filter(c=>daysAgo(c.updatedat)>=3).length,'var(--red)'],
+        ['สถานะดี',cases.filter(c=>['ไปต่อได้','จอง','รอเซ็นต์','รอผล','อนุมัติ'].includes(c.status)).length,'var(--green)'],
+      ].map(([l,v,c])=>
+        <div key={l} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 8px',textAlign:'center'}}>
+          <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+          <div style={{fontSize:11,color:'var(--text2)'}}>{l}</div>
+        </div>
+      )}
+    </div>}
+
+    {/* Desc */}
+    {!aiText&&!aiLoading&&<div style={{background:'var(--bg3)',borderRadius:10,padding:'14px',fontSize:13,color:'var(--text2)',lineHeight:1.9,marginBottom:14}}>
+      {tab==='urgent'&&<>🚨 <strong>เร่งด่วน</strong> — AI คัด 10 เคสที่ต้องติดตามก่อนจากทั้งทีม ดูจากสถานะ + วันที่ไม่อัปเดต</>}
+      {tab==='performance'&&<>📊 <strong>Performance</strong> — วิเคราะห์ผลงานเซลส์แต่ละคน จัดอันดับ หาจุดแข็ง/อ่อน</>}
+      {tab==='winrate'&&<>🎯 <strong>Win Rate ทีม</strong> — หาเคสที่มีโอกาสปิดสูงทั่วทั้งทีม ไม่ใช่แค่เซลส์คนเดียว</>}
+      {tab==='assign'&&<>💡 <strong>แนะนำ Assign</strong> — AI แนะนำว่าเคสใหม่ควรให้ใคร ดูจากภาระงานและ performance</>}
+    </div>}
+
+    {/* Ask button */}
+    {!aiLoading&&(!aiText||aiDone)&&<button
+      className="btn btn-primary"
+      style={{width:'100%',padding:'13px',fontSize:15,fontWeight:700,borderRadius:10,
+        background:'linear-gradient(135deg,#1f6feb,#8250df)',marginBottom:16,
+        display:'flex',alignItems:'center',justifyContent:'center',gap:8}}
+      disabled={loading}
+      onClick={askAI}>
+      <span style={{fontSize:20}}>🧠</span>
+      {tab==='urgent'?'วิเคราะห์เคสเร่งด่วนทั้งทีม':
+       tab==='performance'?'วิเคราะห์ Performance ทีม':
+       tab==='winrate'?'หาเคสโอกาสปิดสูงทั่วทีม':
+       'แนะนำการ Assign เคส'}
+    </button>}
+
+    {/* Output */}
+    {(aiText||aiLoading)&&<div className="card" style={{marginBottom:14}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+        <div style={{fontWeight:700,fontSize:13,color:'var(--purple)',display:'flex',alignItems:'center',gap:6}}>
+          🧠 {aiLoading?'AI กำลังวิเคราะห์...':'ผลวิเคราะห์'}
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          {aiLoading&&<button className="btn btn-ghost" style={{fontSize:12,padding:'3px 10px'}} onClick={()=>abortRef.current?.abort()}>หยุด</button>}
+          {aiDone&&<button className="btn btn-ghost" style={{fontSize:12,padding:'3px 10px'}} onClick={()=>{setAiText('');setAiDone(false);}}>ล้าง</button>}
+        </div>
+      </div>
+      <div className="ai-stream">{aiText}{aiLoading&&<span className="ai-cursor"/>}</div>
+    </div>}
+  </div>;
+}
+
 function AdminApp({currentUser,onLogout}){
   const [page,setPage]=useState('cases');
   const [users,setUsers]=useState([]);
@@ -3427,7 +3612,7 @@ function AdminApp({currentUser,onLogout}){
     api('getNotifications',{sales:'admin'}).then(r=>{if(r.success){const u=r.data.filter(n=>n['สถานะ']==='unread');setNotifCount(u.length);}});
   },[]);
 
-  const pages={cases:<AdminCurrentCases currentUser={currentUser} users={users}/>,market:<AdminMarket currentUser={currentUser} users={users}/>,dashboard:<AdminDashboard currentUser={currentUser}/>,bookings:<AdminBookings currentUser={currentUser} users={users}/>,users:<AdminUsers currentUser={currentUser}/>};
+  const pages={cases:<AdminCurrentCases currentUser={currentUser} users={users}/>,market:<AdminMarket currentUser={currentUser} users={users}/>,dashboard:<AdminDashboard currentUser={currentUser}/>,bookings:<AdminBookings currentUser={currentUser} users={users}/>,users:<AdminUsers currentUser={currentUser}/>,ai:<AdminAIPage currentUser={currentUser}/>};
 
   const navItems=[
     {key:'cases',icon:<Ico.home/>,label:'เคสปัจจุบัน'},
@@ -3435,6 +3620,7 @@ function AdminApp({currentUser,onLogout}){
     {key:'dashboard',icon:<Ico.dash/>,label:'แดชบอร์ด'},
     {key:'bookings',icon:<Ico.book/>,label:'การจอง'},
     {key:'users',icon:<Ico.user/>,label:'ผู้ใช้'},
+    {key:'ai',icon:<Ico.ai/>,label:'AI Admin'},
   ];
 
   return <div>
