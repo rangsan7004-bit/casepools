@@ -544,7 +544,7 @@ async function sbApi(action,data){
     }
 
     case 'getBookings':{
-      const q={order:'id.desc'};if(data.sales)q.sales=`eq.${data.sales}`;
+      const q={order:'createdat.desc'};if(data.sales)q.sales=`eq.${data.sales}`;
       const rows=await sbQ('GET','bookings',q);
       return {success:true,data:(rows||[]).map(mapBooking)};
     }
@@ -586,7 +586,7 @@ async function sbApi(action,data){
     }
 
     case 'getHistory':{
-      const q={order:'id.desc'};if(data.caseId)q.caseid=`eq.${data.caseId}`;
+      const q={order:'createdat.desc'};if(data.caseId)q.caseid=`eq.${data.caseId}`;
       const rows=await sbQ('GET','history',q);
       return {success:true,data:(rows||[]).map(mapHistory)};
     }
