@@ -1619,51 +1619,17 @@ function AdminDailyReport() {
   const today = new Date();
   const padZ = n => String(n).padStart(2,'0');
   const todayISO = `${today.getFullYear()}-${padZ(today.getMonth()+1)}-${padZ(today.getDate())}`;
-  const todayTH = `${padZ(today.getDate())}/${padZ(today.getMonth()+1)}/${String(today.getFullYear()).slice(-2)}`;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [selDate, setSelDate] = useState(todayISO);
-  const [chat, setChat] = useState('');
-  const [line, setLine] = useState('');
-  const [reportText, setReportText] = useState('');
-  const [copied, setCopied] = useState(false);
   const [sheetUrl, setSheetUrl] = useState(SHEET_CSV_URL);
   const [showUrlInput, setShowUrlInput] = useState(false);
-  const [stats, setStats] = useState(null);
+  const [headers, setHeaders] = useState([]);
+  const [tab, setTab] = useState('overview');
+  const [searchQ, setSearchQ] = useState('');
 
-  async function fetchSheet() {
-    setLoading(true); setError(''); setRows([]);
-    try {
-      const res = await fetch(sheetUrl + '&t=' + Date.now());
-      if (!res.ok) throw new Error('ดึงข้อมูลไม่ได้ — กรุณาตรวจสอบว่า Sheet เป็น Public');
-      const text = await res.text();
-      const parsed = parseCSV(text);
-      setRows(parsed);
-      computeStats(parsed);
-    } catch(e) {
-      setError(e.message || 'เกิดข้อผิดพลาด ตรวจสอบว่า Sheet ตั้งเป็น "ใครก็ดูได้"');
-    }
-    setLoading(false);
-  }
-
-  function computeStats(data) {
-    const byStatus = {};
-    const bySales = {};
-    const bySource = {};
-    data.forEach(r => {
-      const st = r['สถานะ'] || r['status'] || '';
-      const sl = r['เซลส์'] || r['sales'] || '';
-      const src = r['แหล่งที่มา'] || r['source'] || '';
-      if (st) byStatus[st] = (byStatus[st] || 0) + 1;
-      if (sl) bySales[sl] = (bySales[sl] || 0) + 1;
-      if (src) bySource[src] = (bySource[src] || 0) + 1;
-    });
-    setStats({ byStatus, bySales, bySource, total: data.length });
-  }
-
-  function getKeyVariants(row, ...keys) {
+  function getV(row, ...keys) {
     for (const k of keys) {
       const found = Object.keys(row).find(rk => rk.toLowerCase().includes(k.toLowerCase()));
       if (found && row[found]) return row[found];
@@ -1671,234 +1637,259 @@ function AdminDailyReport() {
     return '';
   }
 
-  function filterByDate(data, dateISO) {
-    return data.filter(r => {
-      const keys = Object.keys(r);
-      // Check all date columns
-      for (const k of keys) {
-        if (/date|วันที่|จอง|ปล่อย|approve|เซ็น/i.test(k)) {
-          if (normalizeDate(r[k]) === dateISO) return true;
-        }
-      }
-      return false;
-    });
-  }
-
-  function buildRowLine(r, statusType) {
-    const model = getKeyVariants(r, 'รุ่นรถ', 'รุ่น', 'model');
-    const plate = getKeyVariants(r, 'ทะเบียน', 'plate', 'license');
-    const province = getKeyVariants(r, 'จังหวัด', 'province');
-    const sales = getKeyVariants(r, 'เซลส์', 'sales');
-    const source = getKeyVariants(r, 'แหล่งที่มา', 'source');
-    const bank = getKeyVariants(r, 'ธนาคาร', 'bank');
-    const p4 = getPlate4(plate);
-
-    if (statusType === 'จอง') {
-      return `${model} (${p4})(${province})(${sales}) ${source}`.trim();
-    } else if (statusType === 'อนุมัติ') {
-      return `${model} (${p4})(${province})(${bank})(${sales})`.trim();
-    } else if (statusType === 'ปล่อย') {
-      return `${model} (${p4})(${province})(${bank})(${sales})`.trim();
-    } else {
-      return `${model} (${p4})(${province})(${sales})`.trim();
+  async function fetchSheet() {
+    setLoading(true); setError(''); setRows([]); setHeaders([]);
+    try {
+      const res = await fetch(sheetUrl + '&t=' + Date.now());
+      if (!res.ok) throw new Error('ดึงข้อมูลไม่ได้ — ตรวจสอบว่า Sheet เป็น Public');
+      const text = await res.text();
+      const parsed = parseCSV(text);
+      setRows(parsed);
+      if (parsed.length > 0) setHeaders(Object.keys(parsed[0]));
+    } catch(e) {
+      setError(e.message || 'เกิดข้อผิดพลาด — Sheet ต้องตั้งเป็น "ใครก็ดูได้"');
     }
+    setLoading(false);
   }
 
-  function generateReport() {
-    const dateISO = selDate;
-    const displayDate = (()=>{
-      const [y,m,d] = dateISO.split('-');
-      return `${d}/${m}/${String(y).slice(-2)}`;
-    })();
-
-    // Group rows by what happened on selDate
-    const booked = [], approved = [], released = [], returned = [], changed = [];
-
+  // ── Analytics ──
+  const stats = rows.length ? (() => {
+    const byStatus={}, bySales={}, byBank={}, bySource={}, byBrand={}, byMonth={};
+    let totalRevenue=0, totalDown=0, totalApproved=0;
     rows.forEach(r => {
-      const st = (getKeyVariants(r,'สถานะ','status') || '').toLowerCase();
-      const remarkRaw = getKeyVariants(r,'remark','หมายเหตุ','remark') || '';
-      const remark = remarkRaw.toLowerCase();
-      // คืนจอง
-      if (remark.includes('คืนจอง') || st.includes('คืน')) {
-        const dateBook = getKeyVariants(r,'date จอง','จอง');
-        if (normalizeDate(dateBook) === dateISO) { returned.push(r); return; }
+      const st  = getV(r,'สถานะ','status') || '';
+      const sl  = getV(r,'เซลส์','sales') || '';
+      const bk  = getV(r,'ธนาคาร','bank') || '';
+      const src = getV(r,'แหล่งที่มา','source') || '';
+      const br  = getV(r,'ยี่ห้อ','brand') || '';
+      const price = parseFloat(String(getV(r,'ราคารถ','price')||'0').replace(/,/g,'')) || 0;
+      const down  = parseFloat(String(getV(r,'เงินดาวน์','down')||'0').replace(/,/g,'')) || 0;
+      const appAmt= parseFloat(String(getV(r,'ยอดอนุมัติ','approved')||'0').replace(/,/g,'')) || 0;
+      const dateBook = normalizeDate(getV(r,'date จอง','Date จอง','จอง'));
+      if (dateBook) {
+        const mon = dateBook.slice(0,7);
+        if (!byMonth[mon]) byMonth[mon]={total:0,released:0,revenue:0};
+        byMonth[mon].total++;
+        if (['ปล่อยแล้ว','ปล่อย'].includes(st)) byMonth[mon].released++;
+        byMonth[mon].revenue += price;
       }
-      // เปลี่ยนคัน
-      if (remark.includes('เปลี่ยนคัน') || remark.includes('เปลี่ยน')) {
-        const dateBook = getKeyVariants(r,'date จอง','จอง');
-        if (normalizeDate(dateBook) === dateISO) { changed.push(r); return; }
+      if (st) byStatus[st] = (byStatus[st]||0)+1;
+      if (sl) { if(!bySales[sl])bySales[sl]={total:0,released:0,approved:0};
+        bySales[sl].total++;
+        if(['ปล่อยแล้ว','ปล่อย'].includes(st))bySales[sl].released++;
+        if(['อนุมัติ'].includes(st)||appAmt>0)bySales[sl].approved++;
       }
-      // ปล่อย — check date ปล่อย
-      const datePl = getKeyVariants(r,'date วันปล่อย','ปล่อย','release');
-      if (normalizeDate(datePl) === dateISO) { released.push(r); return; }
-      // อนุมัติ — check approve date
-      const dateAp = getKeyVariants(r,'approve','อนุมัติ');
-      if (normalizeDate(dateAp) === dateISO) { approved.push(r); return; }
-      // จอง — check date จอง
-      const dateBook = getKeyVariants(r,'date จอง','จอง');
-      if (normalizeDate(dateBook) === dateISO) { booked.push(r); }
+      if (bk) byBank[bk] = (byBank[bk]||0)+1;
+      if (src) bySource[src] = (bySource[src]||0)+1;
+      if (br) byBrand[br] = (byBrand[br]||0)+1;
+      totalRevenue += price; totalDown += down; totalApproved += appAmt;
     });
-
-    let txt = `รายงานเพจ ${displayDate}\n`;
-    if (chat) txt += `แชท ${chat}\n`;
-    if (line) txt += `เบอร์ไลน์ ${line}\n`;
-    if (booked.length) { txt += `จอง\n`; booked.forEach(r => { txt += buildRowLine(r,'จอง') + '\n'; }); }
-    if (approved.length) { txt += `อนุมัติ\n`; approved.forEach(r => { txt += buildRowLine(r,'อนุมัติ') + '\n'; }); }
-    if (released.length) { txt += `ปล่อย\n`; released.forEach(r => { txt += buildRowLine(r,'ปล่อย') + '\n'; }); }
-    if (returned.length) { txt += `คืนจอง\n`; returned.forEach(r => { txt += buildRowLine(r,'คืนจอง') + '\n'; }); }
-    if (changed.length) { txt += `เปลี่ยนคัน\n`; changed.forEach(r => { txt += buildRowLine(r,'เปลี่ยนคัน') + '\n'; }); }
-
-    if (!booked.length && !approved.length && !released.length && !returned.length && !changed.length) {
-      txt += `(ไม่มีรายการในวันที่นี้)`;
-    }
-    setReportText(txt.trim());
-  }
-
-  function copyReport() {
-    try { navigator.clipboard.writeText(reportText); } catch(e) {}
-    setCopied(true); setTimeout(() => setCopied(false), 2500);
-  }
-
-  // Count rows for selected date
-  const todayRows = rows.length ? (() => {
-    const booked=[], approved=[], released=[];
-    rows.forEach(r => {
-      const datePl = getKeyVariants(r,'date วันปล่อย','ปล่อย','release');
-      if (normalizeDate(datePl) === selDate) { released.push(r); return; }
-      const dateAp = getKeyVariants(r,'approve','อนุมัติ');
-      if (normalizeDate(dateAp) === selDate) { approved.push(r); return; }
-      const dateBook = getKeyVariants(r,'date จอง','จอง');
-      if (normalizeDate(dateBook) === selDate) booked.push(r);
+    // avg days: booking → release
+    let totalDays=0, cntDays=0;
+    rows.forEach(r=>{
+      const d1=getV(r,'date จอง','Date จอง');
+      const d2=getV(r,'date วันปล่อย','ปล่อย');
+      const n1=normalizeDate(d1), n2=normalizeDate(d2);
+      if(n1&&n2){const diff=(new Date(n2)-new Date(n1))/86400000;if(diff>=0&&diff<365){totalDays+=diff;cntDays++;}}
     });
-    return { booked, approved, released };
+    return { byStatus, bySales, byBank, bySource, byBrand, byMonth,
+      totalRevenue, totalDown, totalApproved,
+      avgDays: cntDays>0?Math.round(totalDays/cntDays):null, total:rows.length };
   })() : null;
+
+  const filteredRows = rows.filter(r => {
+    if (!searchQ) return true;
+    return Object.values(r).some(v => String(v).toLowerCase().includes(searchQ.toLowerCase()));
+  });
+
+  const TABS = [['overview','📊 ภาพรวม'],['sales','👤 รายเซลส์'],['bank','🏦 ธนาคาร'],['source','📌 แหล่งที่มา'],['brand','🚗 ยี่ห้อ'],['table','🗂 ตารางข้อมูล']];
+
+  const fmt = n => n ? Number(n).toLocaleString() : '0';
 
   return <div className="page">
     <div className="page-hd">
-      <div><div className="page-title">📋 Daily Report</div><div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>สร้างรายงานประจำวัน จาก Google Sheet</div></div>
-      <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setShowUrlInput(v=>!v)}>⚙️ ตั้งค่า</button>
+      <div><div className="page-title">📊 Sheet Analyzer</div><div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>วิเคราะห์ข้อมูลจาก Google Sheet</div></div>
+      <button className="btn btn-ghost" style={{fontSize:12}} onClick={()=>setShowUrlInput(v=>!v)}>⚙️ Sheet URL</button>
     </div>
 
-    {/* Sheet URL setting */}
-    {showUrlInput && <div className="card" style={{marginBottom:16}}>
+    {showUrlInput && <div className="card" style={{marginBottom:14}}>
       <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🔗 Google Sheet CSV URL</div>
       <div style={{display:'flex',gap:8}}>
-        <input value={sheetUrl} onChange={e=>setSheetUrl(e.target.value)} style={{flex:1,fontSize:12}} placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv"/>
-        <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={()=>{setShowUrlInput(false);fetchSheet();}}>บันทึก + ดึงข้อมูล</button>
+        <input value={sheetUrl} onChange={e=>setSheetUrl(e.target.value)} style={{flex:1,fontSize:12}} placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=0"/>
+        <button className="btn btn-primary" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={()=>{setShowUrlInput(false);fetchSheet();}}>บันทึก</button>
       </div>
-      <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>⚠️ Sheet ต้องตั้งเป็น "ใครก็ดูได้" (Anyone with the link)</div>
+      <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>⚠️ Sheet ต้องตั้งเป็น "ใครก็ดูได้ที่มีลิงก์" ก่อนครับ</div>
     </div>}
 
-    {/* Fetch button */}
-    <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
-      <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)} style={{width:160,fontSize:14}}/>
-      <button className="btn btn-primary" style={{fontSize:14,padding:'9px 20px'}} onClick={fetchSheet} disabled={loading}>
-        {loading ? '⏳ กำลังดึงข้อมูล...' : '🔄 ดึงข้อมูลจาก Sheet'}
-      </button>
-      {rows.length > 0 && <span style={{fontSize:12,color:'var(--green)',fontWeight:600}}>✅ โหลดแล้ว {rows.length} แถว</span>}
-    </div>
+    <button className="btn btn-primary" style={{width:'100%',padding:'12px',fontSize:15,fontWeight:700,marginBottom:14,display:'flex',alignItems:'center',justifyContent:'center',gap:8}} onClick={fetchSheet} disabled={loading}>
+      {loading ? <><span className="spin" style={{width:18,height:18}}/> กำลังดึงข้อมูล...</> : '🔄 ดึงข้อมูลจาก Google Sheet'}
+    </button>
 
-    {error && <div style={{background:'rgba(248,81,73,.1)',border:'1px solid var(--red)',borderRadius:8,padding:'12px 16px',marginBottom:16,fontSize:13,color:'var(--red)'}}>{error}</div>}
+    {error && <div style={{background:'rgba(248,81,73,.1)',border:'1px solid var(--red)',borderRadius:8,padding:'12px 16px',marginBottom:14,fontSize:13,color:'var(--red)'}}>{error}</div>}
 
-    {rows.length > 0 && <>
-      {/* Stats Overview */}
-      {stats && <div className="card" style={{marginBottom:16}}>
-        <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📊 ภาพรวม Sheet ทั้งหมด ({stats.total} แถว)</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:8,marginBottom:12}}>
-          {Object.entries(stats.byStatus).sort((a,b)=>b[1]-a[1]).map(([st,cnt])=>
-            <div key={st} style={{background:'var(--bg3)',borderRadius:8,padding:'8px 10px',textAlign:'center'}}>
-              <div style={{fontSize:18,fontWeight:800,color:'var(--blue)'}}>{cnt}</div>
-              <div style={{fontSize:11,color:'var(--text2)'}}>{st}</div>
-            </div>)}
-        </div>
-        <div style={{borderTop:'1px solid var(--border)',paddingTop:10}}>
-          <div style={{fontSize:12,color:'var(--text2)',marginBottom:6,fontWeight:600}}>📌 แหล่งที่มา</div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-            {Object.entries(stats.bySource).sort((a,b)=>b[1]-a[1]).map(([src,cnt])=>
-              <div key={src} style={{background:'rgba(88,166,255,.1)',border:'1px solid rgba(88,166,255,.2)',borderRadius:20,padding:'2px 10px',fontSize:12}}>
-                <span style={{color:'var(--blue)',fontWeight:700}}>{cnt}</span> <span style={{color:'var(--text2)'}}>{src}</span>
-              </div>)}
-          </div>
-        </div>
-      </div>}
-
-      {/* Selected date summary */}
-      {todayRows && <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
-        {[['📋 จอง',todayRows.booked.length,'var(--blue)'],['✅ อนุมัติ',todayRows.approved.length,'var(--green)'],['🚗 ปล่อย',todayRows.released.length,'var(--purple)']].map(([l,v,c])=>
-          <div key={l} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'14px 10px',textAlign:'center'}}>
-            <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
-            <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>{l}</div>
-          </div>)}
-      </div>}
-
-      {/* Report builder */}
-      <div className="card" style={{marginBottom:16}}>
-        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>✏️ สร้างรายงาน</div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
-          <div className="form-group" style={{margin:0}}>
-            <label>แชท (จำนวน)</label>
-            <input type="number" value={chat} onChange={e=>setChat(e.target.value)} placeholder="0" min={0}/>
-          </div>
-          <div className="form-group" style={{margin:0}}>
-            <label>เบอร์ไลน์ (จำนวน)</label>
-            <input type="number" value={line} onChange={e=>setLine(e.target.value)} placeholder="0" min={0}/>
-          </div>
-        </div>
-        <button className="btn btn-primary" style={{width:'100%',padding:'12px',fontSize:15,fontWeight:700}} onClick={generateReport}>
-          🚀 สร้างรายงาน
-        </button>
+    {rows.length > 0 && stats && <>
+      {/* KPI strip */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:8,marginBottom:14}}>
+        {[
+          ['📄 ทั้งหมด', stats.total, 'var(--text)'],
+          ['✅ ปล่อยแล้ว', (stats.byStatus['ปล่อยแล้ว']||0)+(stats.byStatus['ปล่อย']||0), 'var(--green)'],
+          ['🟡 อนุมัติ', stats.byStatus['อนุมัติ']||0, 'var(--yellow)'],
+          ['📋 จอง', stats.byStatus['จอง']||0, 'var(--blue)'],
+          ['⏳ รอผล', stats.byStatus['รอผล']||0, 'var(--purple)'],
+          stats.avgDays!=null ? ['⏱ เฉลี่ยจอง→ปล่อย', stats.avgDays+' วัน', 'var(--orange)'] : null,
+        ].filter(Boolean).map(([l,v,c])=><div key={l} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 8px',textAlign:'center'}}>
+          <div style={{fontSize:18,fontWeight:800,color:c}}>{v}</div>
+          <div style={{fontSize:10,color:'var(--text3)',marginTop:3,lineHeight:1.3}}>{l}</div>
+        </div>)}
       </div>
 
-      {/* Report output */}
-      {reportText && <div className="card">
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-          <div style={{fontWeight:700,fontSize:14}}>📄 รายงานสำหรับส่งเจ้านาย</div>
-          <button
-            className="btn btn-green"
-            style={{padding:'7px 20px',fontSize:13,fontWeight:700}}
-            onClick={copyReport}>
-            {copied ? '✅ คัดลอกแล้ว!' : '📋 Copy ส่ง LINE'}
-          </button>
+      {/* Tabs */}
+      <div style={{display:'flex',gap:6,marginBottom:14,overflowX:'auto',paddingBottom:4}}>
+        {TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:'6px 14px',borderRadius:20,border:'none',cursor:'pointer',fontSize:12,fontWeight:600,whiteSpace:'nowrap',background:tab===k?'var(--blue2)':'var(--bg3)',color:tab===k?'#fff':'var(--text2)'}}>{l}</button>)}
+      </div>
+
+      {/* Overview */}
+      {tab==='overview' && <div style={{display:'grid',gap:14}}>
+        {/* Status breakdown */}
+        <div className="card">
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📋 สถานะทั้งหมด</div>
+          {Object.entries(stats.byStatus).sort((a,b)=>b[1]-a[1]).map(([st,cnt])=>{
+            const pct=Math.round(cnt/stats.total*100);
+            return <div key={st} style={{marginBottom:10}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <StatusBadge status={st}/>
+                <span style={{fontSize:13,fontWeight:700}}>{cnt} <span style={{fontSize:11,color:'var(--text3)'}}>({pct}%)</span></span>
+              </div>
+              <div style={{height:7,background:'var(--bg3)',borderRadius:4,overflow:'hidden'}}>
+                <div style={{height:'100%',borderRadius:4,background:'var(--blue)',width:`${pct}%`,transition:'width .4s'}}/>
+              </div>
+            </div>;
+          })}
         </div>
-        <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8,padding:'14px 16px',fontFamily:'monospace',fontSize:13,lineHeight:1.9,whiteSpace:'pre-wrap',color:'var(--text)',maxHeight:400,overflowY:'auto'}}>
-          {reportText}
-        </div>
+
+        {/* Monthly trend */}
+        {Object.keys(stats.byMonth).length > 1 && <div className="card">
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📈 Trend รายเดือน (จากวันที่จอง)</div>
+          {Object.entries(stats.byMonth).sort((a,b)=>a[0].localeCompare(b[0])).slice(-6).map(([mon,d])=>{
+            const [y,m] = mon.split('-');
+            const label = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][parseInt(m)-1]+' '+(parseInt(y)+543).toString().slice(-2);
+            const wr = d.total>0?Math.round(d.released/d.total*100):0;
+            return <div key={mon} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+              <div style={{fontSize:12,color:'var(--text2)',width:60,flexShrink:0}}>{label}</div>
+              <div style={{flex:1,height:22,background:'var(--bg3)',borderRadius:5,overflow:'hidden',position:'relative'}}>
+                <div style={{height:'100%',width:`${Math.min(wr,100)}%`,background:'var(--green)',borderRadius:5,opacity:.8}}/>
+                <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:8,fontSize:11,fontWeight:700,color:'var(--text)'}}>
+                  {d.total} คัน · ปล่อย {d.released} · Win {wr}%
+                </div>
+              </div>
+            </div>;
+          })}
+        </div>}
       </div>}
 
-      {/* Raw table preview */}
-      <div className="card" style={{marginTop:16}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:10}}>🗂 ข้อมูลในวันที่ {selDate.split('-').reverse().join('/')} ({[...(todayRows?.booked||[]),...(todayRows?.approved||[]),...(todayRows?.released||[])].length} แถว)</div>
-        {[...(todayRows?.booked||[]),...(todayRows?.approved||[]),...(todayRows?.released||[])].length === 0
-          ? <div style={{textAlign:'center',padding:'20px',color:'var(--text3)',fontSize:13}}>ไม่มีรายการในวันที่นี้</div>
-          : <div className="table-wrap"><table><thead><tr>
-              <th>รุ่น</th><th>ทะเบียน</th><th>สี</th><th>เซลส์</th><th>แหล่งที่มา</th><th>ธนาคาร</th><th>สถานะ</th>
-            </tr></thead><tbody>
-              {[...(todayRows?.booked||[]),...(todayRows?.approved||[]),...(todayRows?.released||[])].map((r,i)=>{
-                const model = getKeyVariants(r,'รุ่นรถ','รุ่น');
-                const plate = getKeyVariants(r,'ทะเบียน','plate');
-                const color = getKeyVariants(r,'สีรถ','สี','color');
-                const sales = getKeyVariants(r,'เซลส์','sales');
-                const source = getKeyVariants(r,'แหล่งที่มา','source');
-                const bank = getKeyVariants(r,'ธนาคาร','bank');
-                const status = getKeyVariants(r,'สถานะ','status');
-                return <tr key={i}>
-                  <td style={{fontWeight:600}}>{model}</td>
-                  <td style={{color:'var(--blue)'}}>{plate}</td>
-                  <td style={{fontSize:12,color:'var(--text2)'}}>{color}</td>
-                  <td style={{color:'var(--purple)'}}>{sales}</td>
-                  <td style={{fontSize:12}}>{source}</td>
-                  <td style={{fontSize:12}}>{bank}</td>
-                  <td><StatusBadge status={status}/></td>
-                </tr>;
-              })}
-            </tbody></table></div>}
-      </div>
+      {/* Sales tab */}
+      {tab==='sales' && <div className="card">
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>👤 ผลงานแต่ละเซลส์</div>
+        {Object.entries(stats.bySales).sort((a,b)=>b[1].released-a[1].released).map(([name,d],i)=>{
+          const wr = d.total>0?Math.round(d.released/d.total*100):0;
+          return <div key={name} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+            <div style={{width:28,height:28,borderRadius:'50%',background:i===0?'#3d2a00':i===1?'#1c1c2e':i===2?'#1a2a00':'var(--bg3)',color:i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--text2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>
+              {i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:14}}>{name}</div>
+              <div style={{fontSize:11,color:'var(--text2)'}}>จอง {d.total} · อนุมัติ {d.approved} · ปล่อย {d.released}</div>
+              <div style={{height:6,background:'var(--bg3)',borderRadius:3,overflow:'hidden',marginTop:5}}>
+                <div style={{height:'100%',borderRadius:3,background:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)',width:`${wr}%`}}/>
+              </div>
+            </div>
+            <div style={{textAlign:'right',flexShrink:0}}>
+              <div style={{fontSize:18,fontWeight:800,color:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)'}}>{wr}%</div>
+              <div style={{fontSize:10,color:'var(--text3)'}}>Win Rate</div>
+            </div>
+          </div>;
+        })}
+      </div>}
+
+      {/* Bank tab */}
+      {tab==='bank' && <div className="card">
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>🏦 ธนาคารที่ใช้บ่อย</div>
+        {Object.entries(stats.byBank).sort((a,b)=>b[1]-a[1]).map(([bk,cnt])=>{
+          const pct=Math.round(cnt/(Object.values(stats.byBank).reduce((a,b)=>a+b,0))*100);
+          return <div key={bk} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:600,width:80,flexShrink:0}}>{bk}</div>
+            <div style={{flex:1,height:26,background:'var(--bg3)',borderRadius:6,overflow:'hidden',position:'relative'}}>
+              <div style={{height:'100%',background:'rgba(88,166,255,.6)',width:`${pct}%`,borderRadius:6}}/>
+              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:10,fontSize:12,fontWeight:700}}>{cnt} เคส ({pct}%)</div>
+            </div>
+          </div>;
+        })}
+      </div>}
+
+      {/* Source tab */}
+      {tab==='source' && <div className="card">
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>📌 แหล่งที่มาของลูกค้า</div>
+        {Object.entries(stats.bySource).sort((a,b)=>b[1]-a[1]).map(([src,cnt])=>{
+          const pct=Math.round(cnt/(Object.values(stats.bySource).reduce((a,b)=>a+b,0))*100);
+          return <div key={src} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:600,width:80,flexShrink:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{src}</div>
+            <div style={{flex:1,height:26,background:'var(--bg3)',borderRadius:6,overflow:'hidden',position:'relative'}}>
+              <div style={{height:'100%',background:'rgba(188,140,255,.6)',width:`${pct}%`,borderRadius:6}}/>
+              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:10,fontSize:12,fontWeight:700}}>{cnt} เคส ({pct}%)</div>
+            </div>
+          </div>;
+        })}
+      </div>}
+
+      {/* Brand tab */}
+      {tab==='brand' && <div className="card">
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>🚗 ยี่ห้อรถที่ขายบ่อย</div>
+        {Object.entries(stats.byBrand).sort((a,b)=>b[1]-a[1]).map(([br,cnt])=>{
+          const pct=Math.round(cnt/(Object.values(stats.byBrand).reduce((a,b)=>a+b,0))*100);
+          return <div key={br} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:600,width:80,flexShrink:0}}>{br}</div>
+            <div style={{flex:1,height:26,background:'var(--bg3)',borderRadius:6,overflow:'hidden',position:'relative'}}>
+              <div style={{height:'100%',background:'rgba(63,185,80,.6)',width:`${pct}%`,borderRadius:6}}/>
+              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:10,fontSize:12,fontWeight:700}}>{cnt} คัน ({pct}%)</div>
+            </div>
+          </div>;
+        })}
+      </div>}
+
+      {/* Table tab */}
+      {tab==='table' && <div className="card" style={{padding:0}}>
+        <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)',display:'flex',gap:10,alignItems:'center'}}>
+          <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="🔍 ค้นหาในตาราง..." style={{flex:1,fontSize:13}}/>
+          <span style={{fontSize:12,color:'var(--text3)',flexShrink:0}}>{filteredRows.length} แถว</span>
+        </div>
+        <div className="table-wrap" style={{maxHeight:500,overflowY:'auto'}}>
+          <table>
+            <thead><tr>
+              <th>ยี่ห้อ</th><th>รุ่น</th><th>ทะเบียน</th><th>สี</th><th>เซลส์</th><th>แหล่งที่มา</th><th>ธนาคาร</th><th>สถานะ</th><th>วันจอง</th>
+            </tr></thead>
+            <tbody>
+              {filteredRows.slice(0,100).map((r,i)=><tr key={i}>
+                <td style={{fontWeight:600}}>{getV(r,'ยี่ห้อ','brand')}</td>
+                <td>{getV(r,'รุ่นรถ','รุ่น')}</td>
+                <td style={{color:'var(--blue)',fontWeight:600}}>{getV(r,'ทะเบียน','plate')}</td>
+                <td style={{fontSize:12,color:'var(--text2)'}}>{getV(r,'สีรถ','สี')}</td>
+                <td style={{color:'var(--purple)'}}>{getV(r,'เซลส์','sales')}</td>
+                <td style={{fontSize:12}}>{getV(r,'แหล่งที่มา','source')}</td>
+                <td style={{fontSize:12}}>{getV(r,'ธนาคาร','bank')}</td>
+                <td><StatusBadge status={getV(r,'สถานะ','status')}/></td>
+                <td style={{fontSize:11,color:'var(--text3)'}}>{getV(r,'date จอง','Date จอง')}</td>
+              </tr>)}
+            </tbody>
+          </table>
+          {filteredRows.length > 100 && <div style={{padding:'8px 16px',fontSize:12,color:'var(--text3)',textAlign:'center'}}>แสดง 100 แถวแรก / {filteredRows.length} แถว</div>}
+        </div>
+      </div>}
     </>}
 
     {!rows.length && !loading && !error && <div style={{textAlign:'center',padding:'60px 20px',color:'var(--text2)'}}>
       <div style={{fontSize:52,marginBottom:16}}>📊</div>
-      <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>กด "ดึงข้อมูลจาก Sheet" เพื่อเริ่มต้น</div>
-      <div style={{fontSize:13,color:'var(--text3)'}}>ระบบจะดึงข้อมูลจาก Google Sheet ของคุณ<br/>แล้วสร้างรายงานให้อัตโนมัติ</div>
+      <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>ยังไม่มีข้อมูล</div>
+      <div style={{fontSize:13,color:'var(--text3)',lineHeight:1.8}}>กด "ดึงข้อมูลจาก Google Sheet"<br/>เพื่อดูการวิเคราะห์ข้อมูลทั้งหมดครับ</div>
     </div>}
   </div>;
 }
