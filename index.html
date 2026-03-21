@@ -1731,7 +1731,14 @@ function AdminDailyReport() {
         else if (['ปิดเคส','รีเจค','ยกเลิก'].some(s=>st.includes(s))) bySales[sl].lost++;
         else bySales[sl].booked++; // จอง/รอข้อมูล/อื่น ๆ
       }
-      if (bk) byBank[bk] = (byBank[bk]||0)+1;
+      if (bk) {
+        if(!byBank[bk]) byBank[bk]={total:0,released:0,approved:0,waiting:0,lost:0};
+        byBank[bk].total++;
+        if(isReleased(st)) byBank[bk].released++;
+        else if(isApproved(st)) byBank[bk].approved++;
+        else if(['รอผล','รอเซ็นต์','รอเซ็น'].some(s=>st.includes(s))) byBank[bk].waiting++;
+        else if(['ปิดเคส','รีเจค','ยกเลิก'].some(s=>st.includes(s))) byBank[bk].lost++;
+      }
       if (src) {
         bySource[src] = (bySource[src]||0)+1;
         if (!bySourceDetail[src]) bySourceDetail[src]={total:0,released:0,approved:0,waiting:0,lost:0};
@@ -1944,18 +1951,71 @@ function AdminDailyReport() {
       </div>}
 
       {/* Bank tab */}
-      {tab==='bank' && <div className="card">
-        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>🏦 ธนาคารที่ใช้บ่อย</div>
-        {Object.entries(stats.byBank).sort((a,b)=>b[1]-a[1]).map(([bk,cnt])=>{
-          const pct=Math.round(cnt/(Object.values(stats.byBank).reduce((a,b)=>a+b,0))*100);
-          return <div key={bk} style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-            <div style={{fontSize:13,fontWeight:600,width:80,flexShrink:0}}>{bk}</div>
-            <div style={{flex:1,height:26,background:'var(--bg3)',borderRadius:6,overflow:'hidden',position:'relative'}}>
-              <div style={{height:'100%',background:'rgba(88,166,255,.6)',width:`${pct}%`,borderRadius:6}}/>
-              <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:10,fontSize:12,fontWeight:700}}>{cnt} เคส ({pct}%)</div>
-            </div>
-          </div>;
-        })}
+      {tab==='bank' && <div style={{display:'grid',gap:14}}>
+        {/* Tooltip overlay */}
+        {tooltip && <div style={{position:'fixed',left:tooltip.x+12,top:tooltip.y-8,background:'rgba(13,17,23,.96)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',zIndex:9000,pointerEvents:'none',boxShadow:'0 8px 24px rgba(0,0,0,.5)',minWidth:190,fontSize:12}}>
+          <div style={{fontWeight:700,marginBottom:6,fontSize:13,color:'var(--text)'}}>{tooltip.src}</div>
+          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:3}}><span style={{color:l.color}}>{l.icon} {l.label}</span><span style={{fontWeight:700,color:l.color}}>{l.val} เคส ({l.pct}%)</span></div>)}
+          <div style={{borderTop:'1px solid var(--border)',marginTop:6,paddingTop:6,color:'var(--text3)'}}>รวม {tooltip.total} เคส · Approve Rate <span style={{color:tooltip.wr>=50?'var(--green)':tooltip.wr>=25?'var(--yellow)':'var(--red)',fontWeight:700}}>{tooltip.wr}%</span></div>
+        </div>}
+        <div className="card">
+          <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>🏦 ธนาคาร — จบ / ยังดำเนินการ / ไม่จบ</div>
+          <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:14,fontSize:12}}>
+            {[['🟢','ปล่อยรถแล้ว','#3fb950'],['🔵','อนุมัติรับรถ','#00bcd4'],['🟡','รอผล/รอเซ็น','#d29922'],['🔴','ปิดเคส','#f85149'],['⬜','อื่น ๆ','#6e7681']].map(([icon,label,color])=>
+              <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
+                <div style={{width:12,height:12,borderRadius:3,background:color,flexShrink:0}}/>
+                <span style={{color:'var(--text2)'}}>{label}</span>
+              </div>)}
+          </div>
+          {Object.entries(stats.byBank).sort((a,b)=>b[1].total-a[1].total).map(([bk,d])=>{
+            const total = d.total||1;
+            const pR=Math.round(d.released/total*100);
+            const pA=Math.round(d.approved/total*100);
+            const pW=Math.round(d.waiting/total*100);
+            const pL=Math.round(d.lost/total*100);
+            const pO=Math.max(0,100-pR-pA-pW-pL);
+            const other=d.total-d.released-d.approved-d.waiting-d.lost;
+            const wr=Math.round(d.released/total*100);
+
+            function showBankTip(e){
+              setTooltip({
+                x:e.clientX, y:e.clientY, src:bk, total:d.total, wr,
+                lines:[
+                  {icon:'🟢',label:'ปล่อยรถแล้ว (จบ)',val:d.released,pct:pR,color:'#3fb950'},
+                  {icon:'🔵',label:'อนุมัติรับรถ',val:d.approved,pct:pA,color:'#00bcd4'},
+                  {icon:'🟡',label:'รอผล/รอเซ็น',val:d.waiting,pct:pW,color:'#d29922'},
+                  {icon:'🔴',label:'ปิดเคส (ไม่จบ)',val:d.lost,pct:pL,color:'#f85149'},
+                  {icon:'⬜',label:'อื่น ๆ',val:other,pct:pO,color:'#6e7681'},
+                ].filter(l=>l.val>0)
+              });
+            }
+
+            return <div key={bk} style={{marginBottom:14}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+                <span style={{fontWeight:700,fontSize:13}}>{bk}</span>
+                <span style={{fontSize:11,color:'var(--text3)'}}>ทั้งหมด {d.total} เคส</span>
+              </div>
+              <div
+                style={{height:30,borderRadius:8,overflow:'hidden',display:'flex',width:'100%',background:'#6e768122',cursor:'pointer'}}
+                onMouseMove={showBankTip}
+                onMouseLeave={()=>setTooltip(null)}
+              >
+                {pR>0&&<div style={{width:`${pR}%`,background:'#3fb950',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pR>=8?d.released:''}</div>}
+                {pA>0&&<div style={{width:`${pA}%`,background:'#00bcd4',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pA>=8?d.approved:''}</div>}
+                {pW>0&&<div style={{width:`${pW}%`,background:'#d29922',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pW>=8?d.waiting:''}</div>}
+                {pL>0&&<div style={{width:`${pL}%`,background:'#f85149',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pL>=8?d.lost:''}</div>}
+                {pO>0&&<div style={{width:`${pO}%`,background:'#6e7681',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#fff',transition:'width .4s'}}>{pO>=10?other:''}</div>}
+              </div>
+              <div style={{display:'flex',gap:10,marginTop:4,flexWrap:'wrap'}}>
+                {d.released>0&&<span style={{fontSize:11,color:'#3fb950',fontWeight:600}}>✅ จบ {d.released}</span>}
+                {d.approved>0&&<span style={{fontSize:11,color:'#00bcd4',fontWeight:600}}>🔵 อนุมัติ {d.approved}</span>}
+                {d.waiting>0&&<span style={{fontSize:11,color:'#d29922',fontWeight:600}}>⏳ รอผล {d.waiting}</span>}
+                {d.lost>0&&<span style={{fontSize:11,color:'#f85149',fontWeight:600}}>❌ ไม่จบ {d.lost}</span>}
+                {other>0&&<span style={{fontSize:11,color:'var(--text3)'}}>อื่น ๆ {other}</span>}
+              </div>
+            </div>;
+          })}
+        </div>
       </div>}
 
       {/* Source tab — Stacked funnel */}
