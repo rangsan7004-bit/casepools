@@ -1630,12 +1630,23 @@ function AdminDailyReport() {
   const [searchQ, setSearchQ] = useState('');
 
   function getV(row, ...keys) {
+    // 1. exact match first
     for (const k of keys) {
-      const found = Object.keys(row).find(rk => rk.toLowerCase().includes(k.toLowerCase()));
-      if (found && row[found]) return row[found];
+      if (row[k] !== undefined && row[k] !== '') return row[k];
+    }
+    // 2. contains match (case-insensitive, trim whitespace)
+    for (const k of keys) {
+      const found = Object.keys(row).find(rk => rk.trim().toLowerCase().includes(k.trim().toLowerCase()));
+      if (found && row[found] !== undefined && row[found] !== '') return row[found];
     }
     return '';
   }
+
+  // สถานะจาก Sheet จริง (รองรับทั้งชื่อเต็มและย่อ)
+  const RELEASED_ST = ['ปล่อยรถแล้ว','ปล่อยแล้ว','ปล่อย'];
+  const APPROVED_ST = ['อนุมัติรับรถ','อนุมัติ'];
+  const isReleased = st => RELEASED_ST.some(s => st.includes(s));
+  const isApproved = st => APPROVED_ST.some(s => st.includes(s));
 
   async function fetchSheet() {
     setLoading(true); setError(''); setRows([]); setHeaders([]);
@@ -1657,27 +1668,30 @@ function AdminDailyReport() {
     const byStatus={}, bySales={}, byBank={}, bySource={}, byBrand={}, byMonth={};
     let totalRevenue=0, totalDown=0, totalApproved=0;
     rows.forEach(r => {
-      const st  = getV(r,'สถานะ','status') || '';
-      const sl  = getV(r,'เซลส์','sales') || '';
-      const bk  = getV(r,'ธนาคาร','bank') || '';
-      const src = getV(r,'แหล่งที่มา','source') || '';
-      const br  = getV(r,'ยี่ห้อ','brand') || '';
-      const price = parseFloat(String(getV(r,'ราคารถ','price')||'0').replace(/,/g,'')) || 0;
+      const st  = (getV(r,'สถานะ','status') || '').trim();
+      // ลอง key ที่เป็นไปได้ทั้งหมดสำหรับเซลส์
+      const sl  = (getV(r,'เซลส์','ชื่อเซลส์','sales','Sale','SALES') || '').trim();
+      const bk  = (getV(r,'ธนาคาร','bank','Bank') || '').trim();
+      const src = (getV(r,'แหล่งที่มา','source','Source') || '').trim();
+      // ยี่ห้อ — รองรับ "ยี่นอค" ด้วย (จาก Sheet จริง)
+      const br  = (getV(r,'ยี่ห้อ','ยี่นอค','brand','Brand','make') || '').trim();
+      const price = parseFloat(String(getV(r,'ราคารถ','ราคา','price')||'0').replace(/,/g,'')) || 0;
       const down  = parseFloat(String(getV(r,'เงินดาวน์','down')||'0').replace(/,/g,'')) || 0;
-      const appAmt= parseFloat(String(getV(r,'ยอดอนุมัติ','approved')||'0').replace(/,/g,'')) || 0;
-      const dateBook = normalizeDate(getV(r,'date จอง','Date จอง','จอง'));
+      const appAmt= parseFloat(String(getV(r,'ยอดอนุมัติ','อนุมัติ','approved')||'0').replace(/,/g,'')) || 0;
+      const dateBook = normalizeDate(getV(r,'Date จอง','date จอง','วันที่จอง','จอง'));
       if (dateBook) {
         const mon = dateBook.slice(0,7);
         if (!byMonth[mon]) byMonth[mon]={total:0,released:0,revenue:0};
         byMonth[mon].total++;
-        if (['ปล่อยแล้ว','ปล่อย'].includes(st)) byMonth[mon].released++;
+        if (isReleased(st)) byMonth[mon].released++;
         byMonth[mon].revenue += price;
       }
       if (st) byStatus[st] = (byStatus[st]||0)+1;
-      if (sl) { if(!bySales[sl])bySales[sl]={total:0,released:0,approved:0};
+      if (sl) {
+        if(!bySales[sl]) bySales[sl]={total:0,released:0,approved:0};
         bySales[sl].total++;
-        if(['ปล่อยแล้ว','ปล่อย'].includes(st))bySales[sl].released++;
-        if(['อนุมัติ'].includes(st)||appAmt>0)bySales[sl].approved++;
+        if (isReleased(st)) bySales[sl].released++;
+        if (isApproved(st) || isReleased(st) || appAmt>0) bySales[sl].approved++;
       }
       if (bk) byBank[bk] = (byBank[bk]||0)+1;
       if (src) bySource[src] = (bySource[src]||0)+1;
@@ -1687,8 +1701,8 @@ function AdminDailyReport() {
     // avg days: booking → release
     let totalDays=0, cntDays=0;
     rows.forEach(r=>{
-      const d1=getV(r,'date จอง','Date จอง');
-      const d2=getV(r,'date วันปล่อย','ปล่อย');
+      const d1=getV(r,'Date จอง','date จอง','วันที่จอง');
+      const d2=getV(r,'Date วันปล่อย','date วันปล่อย','วันปล่อย','ปล่อย');
       const n1=normalizeDate(d1), n2=normalizeDate(d2);
       if(n1&&n2){const diff=(new Date(n2)-new Date(n1))/86400000;if(diff>=0&&diff<365){totalDays+=diff;cntDays++;}}
     });
@@ -1732,10 +1746,11 @@ function AdminDailyReport() {
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:8,marginBottom:14}}>
         {[
           ['📄 ทั้งหมด', stats.total, 'var(--text)'],
-          ['✅ ปล่อยแล้ว', (stats.byStatus['ปล่อยแล้ว']||0)+(stats.byStatus['ปล่อย']||0), 'var(--green)'],
-          ['🟡 อนุมัติ', stats.byStatus['อนุมัติ']||0, 'var(--yellow)'],
-          ['📋 จอง', stats.byStatus['จอง']||0, 'var(--blue)'],
+          ['🚗 ปล่อยรถแล้ว', Object.entries(stats.byStatus).filter(([k])=>isReleased(k)).reduce((s,[,v])=>s+v,0), 'var(--green)'],
+          ['✅ อนุมัติรับรถ', Object.entries(stats.byStatus).filter(([k])=>isApproved(k)&&!isReleased(k)).reduce((s,[,v])=>s+v,0), '#00bcd4'],
           ['⏳ รอผล', stats.byStatus['รอผล']||0, 'var(--purple)'],
+          ['📋 จอง', stats.byStatus['จอง']||0, 'var(--blue)'],
+          ['❌ ปิดเคส', stats.byStatus['ปิดเคส']||0, 'var(--red)'],
           stats.avgDays!=null ? ['⏱ เฉลี่ยจอง→ปล่อย', stats.avgDays+' วัน', 'var(--orange)'] : null,
         ].filter(Boolean).map(([l,v,c])=><div key={l} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 8px',textAlign:'center'}}>
           <div style={{fontSize:18,fontWeight:800,color:c}}>{v}</div>
@@ -1768,47 +1783,66 @@ function AdminDailyReport() {
         </div>
 
         {/* Monthly trend */}
-        {Object.keys(stats.byMonth).length > 1 && <div className="card">
+        {Object.keys(stats.byMonth).length > 0 && <div className="card">
           <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📈 Trend รายเดือน (จากวันที่จอง)</div>
           {Object.entries(stats.byMonth).sort((a,b)=>a[0].localeCompare(b[0])).slice(-6).map(([mon,d])=>{
             const [y,m] = mon.split('-');
-            const label = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][parseInt(m)-1]+' '+(parseInt(y)+543).toString().slice(-2);
+            const yr = parseInt(y); // already CE from normalizeDate
+            const label = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][parseInt(m)-1]+' '+(yr+543).toString().slice(-2);
             const wr = d.total>0?Math.round(d.released/d.total*100):0;
+            const maxBar = Math.max(...Object.values(stats.byMonth).map(x=>x.total),1);
             return <div key={mon} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-              <div style={{fontSize:12,color:'var(--text2)',width:60,flexShrink:0}}>{label}</div>
-              <div style={{flex:1,height:22,background:'var(--bg3)',borderRadius:5,overflow:'hidden',position:'relative'}}>
-                <div style={{height:'100%',width:`${Math.min(wr,100)}%`,background:'var(--green)',borderRadius:5,opacity:.8}}/>
+              <div style={{fontSize:12,color:'var(--text2)',width:56,flexShrink:0}}>{label}</div>
+              <div style={{flex:1,height:24,background:'var(--bg3)',borderRadius:5,overflow:'hidden',position:'relative'}}>
+                <div style={{height:'100%',width:`${Math.round(d.total/maxBar*100)}%`,background:'rgba(88,166,255,.4)',borderRadius:5}}/>
+                <div style={{position:'absolute',inset:0,height:'100%',width:`${Math.round(d.released/maxBar*100)}%`,background:'rgba(63,185,80,.7)',borderRadius:5}}/>
                 <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',paddingLeft:8,fontSize:11,fontWeight:700,color:'var(--text)'}}>
-                  {d.total} คัน · ปล่อย {d.released} · Win {wr}%
+                  จอง {d.total} · ปล่อย {d.released} · <span style={{color:wr>=50?'var(--green)':'var(--yellow)',marginLeft:4}}>{wr}%</span>
                 </div>
               </div>
             </div>;
           })}
+          <div style={{display:'flex',gap:12,marginTop:8,fontSize:11,color:'var(--text3)'}}>
+            <span><span style={{display:'inline-block',width:12,height:8,background:'rgba(88,166,255,.4)',borderRadius:2,marginRight:4}}/>จอง</span>
+            <span><span style={{display:'inline-block',width:12,height:8,background:'rgba(63,185,80,.7)',borderRadius:2,marginRight:4}}/>ปล่อยรถแล้ว</span>
+          </div>
         </div>}
       </div>}
 
       {/* Sales tab */}
-      {tab==='sales' && <div className="card">
-        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>👤 ผลงานแต่ละเซลส์</div>
-        {Object.entries(stats.bySales).sort((a,b)=>b[1].released-a[1].released).map(([name,d],i)=>{
-          const wr = d.total>0?Math.round(d.released/d.total*100):0;
-          return <div key={name} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
-            <div style={{width:28,height:28,borderRadius:'50%',background:i===0?'#3d2a00':i===1?'#1c1c2e':i===2?'#1a2a00':'var(--bg3)',color:i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--text2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>
-              {i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}
-            </div>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:600,fontSize:14}}>{name}</div>
-              <div style={{fontSize:11,color:'var(--text2)'}}>จอง {d.total} · อนุมัติ {d.approved} · ปล่อย {d.released}</div>
-              <div style={{height:6,background:'var(--bg3)',borderRadius:3,overflow:'hidden',marginTop:5}}>
-                <div style={{height:'100%',borderRadius:3,background:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)',width:`${wr}%`}}/>
+      {tab==='sales' && <div style={{display:'grid',gap:14}}>
+        {Object.keys(stats.bySales).length === 0
+          ? <div className="card" style={{textAlign:'center',padding:'28px 20px',color:'var(--text2)'}}>
+              <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+              <div style={{fontWeight:600,marginBottom:6}}>ไม่พบข้อมูลเซลส์</div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>คอลัมน์ที่พบใน Sheet:</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6,justifyContent:'center'}}>
+                {headers.map(h=><span key={h} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:20,padding:'2px 10px',fontSize:11}}>{h}</span>)}
               </div>
             </div>
-            <div style={{textAlign:'right',flexShrink:0}}>
-              <div style={{fontSize:18,fontWeight:800,color:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)'}}>{wr}%</div>
-              <div style={{fontSize:10,color:'var(--text3)'}}>Win Rate</div>
-            </div>
-          </div>;
-        })}
+          : <div className="card">
+              <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>👤 ผลงานแต่ละเซลส์</div>
+              {Object.entries(stats.bySales).sort((a,b)=>b[1].released-a[1].released).map(([name,d],i)=>{
+                const wr = d.total>0?Math.round(d.released/d.total*100):0;
+                const medals=['🥇','🥈','🥉'];
+                return <div key={name} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
+                  <div style={{width:28,height:28,borderRadius:'50%',background:i===0?'#3d2a00':i===1?'#1c1c2e':i===2?'#1a2a00':'var(--bg3)',color:i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--text2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>
+                    {i<3?medals[i]:i+1}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:600,fontSize:14}}>{name}</div>
+                    <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>จอง {d.total} · อนุมัติ {d.approved} · ปล่อยรถ {d.released}</div>
+                    <div style={{height:6,background:'var(--bg3)',borderRadius:3,overflow:'hidden',marginTop:5}}>
+                      <div style={{height:'100%',borderRadius:3,background:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)',width:`${wr}%`,transition:'width .5s'}}/>
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontSize:20,fontWeight:800,color:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)'}}>{wr}%</div>
+                    <div style={{fontSize:10,color:'var(--text3)'}}>Win Rate</div>
+                  </div>
+                </div>;
+              })}
+            </div>}
       </div>}
 
       {/* Bank tab */}
