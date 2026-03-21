@@ -1567,6 +1567,7 @@ function LoginPage({onLogin}){
 // ============================================================
 const SHEET_ID = '19l-cEYR3M0NlhRUlBKPjgeHvQK9KBNnA1NeiQKBZRhA';
 const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+const BANK_SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&sheet=bank`;
 
 function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
@@ -1646,7 +1647,44 @@ function AdminDailyReport() {
   });
   const [tab, setTab] = useState('overview');
   const [searchQ, setSearchQ] = useState('');
-  const [tooltip, setTooltip] = useState(null); // {x,y,content}
+  const [tooltip, setTooltip] = useState(null);
+  const [bankLogos, setBankLogos] = useState({});
+
+  // ── Fetch bank logos from "bank" sheet ──
+  useEffect(()=>{
+    const LOGO_CACHE_KEY = 'cp_bank_logos';
+    try {
+      const cached = localStorage.getItem(LOGO_CACHE_KEY);
+      if (cached) { setBankLogos(JSON.parse(cached)); return; }
+    } catch(e) {}
+    fetch(BANK_SHEET_URL + '&t=' + Date.now())
+      .then(r => r.text())
+      .then(text => {
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) return;
+        const map = {};
+        lines.slice(1).forEach(line => {
+          const cols = line.split(',');
+          const name = (cols[0] || '').replace(/^"|"$/g,'').trim();
+          const url  = (cols[1] || '').replace(/^"|"$/g,'').trim();
+          if (name && url) map[name] = url;
+        });
+        setBankLogos(map);
+        try { localStorage.setItem('cp_bank_logos', JSON.stringify(map)); } catch(e) {}
+      })
+      .catch(()=>{});
+  }, []);
+
+  // ── Match bank name to logo (exact → contains) ──
+  function getBankLogo(bankName) {
+    if (!bankName) return null;
+    // exact match
+    if (bankLogos[bankName]) return bankLogos[bankName];
+    // contains match (case-insensitive)
+    const lower = bankName.toLowerCase();
+    const key = Object.keys(bankLogos).find(k => lower.includes(k.toLowerCase()) || k.toLowerCase().includes(lower));
+    return key ? bankLogos[key] : null;
+  } // {x,y,content}
 
   const isCachedToday = headers.length > 0 && rows.length > 0;
 
@@ -1952,7 +1990,10 @@ function AdminDailyReport() {
       {tab==='bank' && <div style={{display:'grid',gap:10}}>
         {/* Elegant Tooltip */}
         {tooltip && <div style={{position:'fixed',left:Math.min(tooltip.x+16,window.innerWidth-240),top:tooltip.y-10,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'12px 16px',zIndex:9000,pointerEvents:'none',boxShadow:'0 16px 40px rgba(0,0,0,.6)',minWidth:210,fontSize:12,backdropFilter:'blur(8px)'}}>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:8,paddingBottom:6,borderBottom:'1px solid var(--border)',color:'var(--text)'}}>{tooltip.src}</div>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8,paddingBottom:6,borderBottom:'1px solid var(--border)',color:'var(--text)',display:'flex',alignItems:'center',gap:8}}>
+            {getBankLogo(tooltip.src)&&<img src={getBankLogo(tooltip.src)} alt="" style={{width:20,height:20,objectFit:'contain',background:'#fff',borderRadius:4,padding:1}} onError={e=>e.target.style.display='none'}/>}
+            {tooltip.src}
+          </div>
           {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
             <div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:8,height:8,borderRadius:50,background:l.color,flexShrink:0}}/><span style={{color:'var(--text2)'}}>{l.label}</span></div>
             <span style={{fontWeight:700,color:l.color}}>{l.val} <span style={{fontWeight:400,color:'var(--text3)'}}>({l.pct}%)</span></span>
@@ -1980,6 +2021,7 @@ function AdminDailyReport() {
           const pO=Math.max(0,100-pR-pA-pW-pL);
           const other=d.total-d.released-d.approved-d.waiting-d.lost;
           const wr=Math.round(d.released/total*100);
+          const logo=getBankLogo(bk);
 
           function showBankTip(e){setTooltip({x:e.clientX,y:e.clientY,src:bk,total:d.total,wr,lines:[
             {label:'ปล่อยรถแล้ว',val:d.released,pct:pR,color:'#3fb950'},
@@ -1993,6 +2035,13 @@ function AdminDailyReport() {
             onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(88,166,255,.35)'}
             onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';setTooltip(null);}}>
             <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+              {/* Bank logo */}
+              <div style={{width:38,height:38,borderRadius:8,background:'#fff',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',flexShrink:0,padding:2}}>
+                {logo
+                  ? <img src={logo} alt={bk} style={{width:'100%',height:'100%',objectFit:'contain'}}
+                      onError={e=>{e.target.style.display='none';}}/>
+                  : <span style={{fontSize:11,fontWeight:800,color:'var(--text3)'}}>{bk.slice(0,3)}</span>}
+              </div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:700,fontSize:14,letterSpacing:'-.2px'}}>{bk}</div>
                 <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>
