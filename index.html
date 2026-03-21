@@ -1173,7 +1173,7 @@ function SalesMarket({currentUser}){
 
 function SalesCurrentCases({currentUser,users}){
   const [cases,setCases]=useState([]);const [loading,setLoading]=useState(true);const [sel,setSel]=useState(null);const [q,setQ]=useState('');const [sortDir,setSortDir]=useState('desc');const [filterStatus,setFilterStatus]=useState('');
-  const CLOSED_STATUSES=['ปิดเคส','รีเจค','ได้รถจากที่อื่น','ปล่อยแล้ว'];
+  const CLOSED_STATUSES=['ปิดเคส','รีเจค','ได้รถจากที่อื่น','โยนเคส','ปล่อยแล้ว'];
   const load=useCallback(()=>{setLoading(true);api('getCases',{sales:currentUser.name,all:'true'}).then(r=>{if(r.success)setCases(r.data||[]);setLoading(false);});},[currentUser.name]);
   useEffect(()=>{load();},[load]);
   // ฝั่ง Sales ซ่อนเคสปิดทั้งหมดเสมอ
