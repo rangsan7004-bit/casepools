@@ -1867,12 +1867,18 @@ function AdminDailyReport() {
       </div>}
 
       {/* Sales tab */}
-      {tab==='sales' && <div style={{display:'grid',gap:14}}>
-        {/* Tooltip overlay */}
-        {tooltip && <div style={{position:'fixed',left:tooltip.x+12,top:tooltip.y-8,background:'rgba(13,17,23,.96)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',zIndex:9000,pointerEvents:'none',boxShadow:'0 8px 24px rgba(0,0,0,.5)',minWidth:190,fontSize:12}}>
-          <div style={{fontWeight:700,marginBottom:6,fontSize:13,color:'var(--text)'}}>{tooltip.src}</div>
-          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:3}}><span style={{color:l.color}}>{l.icon} {l.label}</span><span style={{fontWeight:700,color:l.color}}>{l.val} คัน ({l.pct}%)</span></div>)}
-          <div style={{borderTop:'1px solid var(--border)',marginTop:6,paddingTop:6,color:'var(--text3)'}}>รวม {tooltip.total} คัน · Win Rate <span style={{color:tooltip.wr>=50?'var(--green)':tooltip.wr>=25?'var(--yellow)':'var(--red)',fontWeight:700}}>{tooltip.wr}%</span></div>
+      {tab==='sales' && <div style={{display:'grid',gap:10}}>
+        {/* Elegant Tooltip */}
+        {tooltip && <div style={{position:'fixed',left:Math.min(tooltip.x+16,window.innerWidth-240),top:tooltip.y-10,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'12px 16px',zIndex:9000,pointerEvents:'none',boxShadow:'0 16px 40px rgba(0,0,0,.6)',minWidth:210,fontSize:12}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8,paddingBottom:6,borderBottom:'1px solid var(--border)',color:'var(--text)'}}>{tooltip.src}</div>
+          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+            <div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:8,height:8,borderRadius:50,background:l.color,flexShrink:0}}/><span style={{color:'var(--text2)'}}>{l.label}</span></div>
+            <span style={{fontWeight:700,color:l.color}}>{l.val} <span style={{fontWeight:400,color:'var(--text3)'}}>({l.pct}%)</span></span>
+          </div>)}
+          <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--border)',display:'flex',justifyContent:'space-between'}}>
+            <span style={{color:'var(--text3)',fontSize:11}}>ทั้งหมด {tooltip.total} คัน</span>
+            <span style={{fontWeight:700,fontSize:12,color:tooltip.wr>=50?'#3fb950':tooltip.wr>=25?'#d29922':'#f85149'}}>Win {tooltip.wr}%</span>
+          </div>
         </div>}
 
         {Object.keys(stats.bySales).length === 0
@@ -1884,138 +1890,136 @@ function AdminDailyReport() {
                 {headers.map(h=><span key={h} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:20,padding:'2px 10px',fontSize:11}}>{h}</span>)}
               </div>
             </div>
-          : <div className="card">
-              {/* Legend */}
-              <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:14,fontSize:12}}>
-                {[['🟢','ปล่อยรถแล้ว','#3fb950'],['🔵','อนุมัติรับรถ','#00bcd4'],['🟡','รอผล/รอเซ็น','#d29922'],['🔴','ปิดเคส','#f85149'],['⬜','จอง/อื่น ๆ','#6e7681']].map(([icon,label,color])=>
-                  <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
-                    <div style={{width:12,height:12,borderRadius:3,background:color,flexShrink:0}}/>
-                    <span style={{color:'var(--text2)'}}>{label}</span>
-                  </div>)}
-              </div>
-              {Object.entries(stats.bySales).sort((a,b)=>b[1].released-a[1].released).map(([name,d],i)=>{
-                const total = d.total || 1;
-                const pR = Math.round(d.released/total*100);
-                const pA = Math.round(d.approved/total*100);
-                const pW = Math.round(d.waiting/total*100);
-                const pL = Math.round(d.lost/total*100);
-                const pO = Math.max(0,100-pR-pA-pW-pL);
-                const wr = Math.round(d.released/total*100);
-                const medals=['🥇','🥈','🥉'];
+          : <>
+            {/* Legend */}
+            <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:2}}>
+              {[['#3fb950','ปล่อยรถแล้ว'],['#00bcd4','อนุมัติ'],['#d29922','รอผล'],['#f85149','ปิดเคส'],['#484f58','จอง/อื่น ๆ']].map(([c,l])=>
+                <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text3)'}}>
+                  <div style={{width:8,height:8,borderRadius:'50%',background:c}}/>{l}
+                </div>)}
+            </div>
+            {Object.entries(stats.bySales).sort((a,b)=>b[1].released-a[1].released).map(([name,d],i)=>{
+              const total=d.total||1;
+              const pR=Math.round(d.released/total*100);
+              const pA=Math.round(d.approved/total*100);
+              const pW=Math.round(d.waiting/total*100);
+              const pL=Math.round(d.lost/total*100);
+              const pO=Math.max(0,100-pR-pA-pW-pL);
+              const wr=Math.round(d.released/total*100);
+              const medals=['🥇','🥈','🥉'];
 
-                function showSalesTooltip(e){
-                  setTooltip({
-                    x:e.clientX, y:e.clientY, src:name, total:d.total, wr,
-                    lines:[
-                      {icon:'🟢',label:'ปล่อยรถแล้ว',val:d.released,pct:pR,color:'#3fb950'},
-                      {icon:'🔵',label:'อนุมัติรับรถ',val:d.approved,pct:pA,color:'#00bcd4'},
-                      {icon:'🟡',label:'รอผล/รอเซ็น',val:d.waiting,pct:pW,color:'#d29922'},
-                      {icon:'🔴',label:'ปิดเคส',val:d.lost,pct:pL,color:'#f85149'},
-                      {icon:'⬜',label:'จอง/อื่น ๆ',val:d.booked,pct:pO,color:'#6e7681'},
-                    ].filter(l=>l.val>0)
-                  });
-                }
+              function showSalesTooltip(e){setTooltip({x:e.clientX,y:e.clientY,src:name,total:d.total,wr,lines:[
+                {label:'ปล่อยรถแล้ว',val:d.released,pct:pR,color:'#3fb950'},
+                {label:'อนุมัติรับรถ',val:d.approved,pct:pA,color:'#00bcd4'},
+                {label:'รอผล/รอเซ็น',val:d.waiting,pct:pW,color:'#d29922'},
+                {label:'ปิดเคส',val:d.lost,pct:pL,color:'#f85149'},
+                {label:'จอง/อื่น ๆ',val:d.booked,pct:pO,color:'#484f58'},
+              ].filter(l=>l.val>0)});}
 
-                return <div key={name} style={{marginBottom:16,paddingBottom:16,borderBottom:'1px solid var(--border)'}}>
-                  {/* Header row */}
-                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
-                    <div style={{width:28,height:28,borderRadius:'50%',background:i===0?'#3d2a00':i===1?'#1c1c2e':i===2?'#1a2a00':'var(--bg3)',color:i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--text2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:800,flexShrink:0}}>
-                      {i<3?medals[i]:i+1}
-                    </div>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:700,fontSize:14}}>{name}</div>
-                      <div style={{fontSize:11,color:'var(--text2)',marginTop:1}}>
-                        จอง {d.total} · อนุมัติ {d.approved} · ปล่อย {d.released}{d.waiting>0?` · รอผล ${d.waiting}`:''}{d.lost>0?` · ปิด ${d.lost}`:''}
-                      </div>
-                    </div>
-                    <div style={{textAlign:'right',flexShrink:0}}>
-                      <div style={{fontSize:20,fontWeight:800,color:wr>=60?'var(--green)':wr>=30?'var(--yellow)':'var(--red)'}}>{wr}%</div>
-                      <div style={{fontSize:10,color:'var(--text3)'}}>Win Rate</div>
+              return <div key={name} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',transition:'border-color .15s'}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(88,166,255,.35)'}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';setTooltip(null);}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                  <div style={{width:26,height:26,borderRadius:'50%',background:i===0?'#3d2a00':i===1?'#1c1c2e':i===2?'#1a2a00':'var(--bg3)',color:i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--text3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800,flexShrink:0}}>
+                    {i<3?medals[i]:i+1}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:14}}>{name}</div>
+                    <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>
+                      {[d.released&&`✅ ${d.released}`,d.approved&&`🔵 ${d.approved}`,d.waiting&&`⏳ ${d.waiting}`,d.lost&&`❌ ${d.lost}`,d.booked&&`📋 ${d.booked}`].filter(Boolean).join('  ·  ')}
                     </div>
                   </div>
-                  {/* Stacked bar */}
-                  <div
-                    style={{height:28,borderRadius:8,overflow:'hidden',display:'flex',width:'100%',background:'#6e768122',cursor:'pointer'}}
-                    onMouseMove={showSalesTooltip}
-                    onMouseLeave={()=>setTooltip(null)}
-                  >
-                    {pR>0&&<div style={{width:`${pR}%`,background:'#3fb950',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pR>=8?d.released:''}</div>}
-                    {pA>0&&<div style={{width:`${pA}%`,background:'#00bcd4',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pA>=8?d.approved:''}</div>}
-                    {pW>0&&<div style={{width:`${pW}%`,background:'#d29922',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pW>=8?d.waiting:''}</div>}
-                    {pL>0&&<div style={{width:`${pL}%`,background:'#f85149',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pL>=8?d.lost:''}</div>}
-                    {pO>0&&<div style={{width:`${pO}%`,background:'#6e7681',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#fff',transition:'width .4s'}}>{pO>=8?d.booked:''}</div>}
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontSize:17,fontWeight:800,color:wr>=60?'#3fb950':wr>=30?'#d29922':'#f85149',lineHeight:1}}>{wr}%</div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>Win Rate</div>
                   </div>
-                </div>;
-              })}
-            </div>}
+                </div>
+                {/* Slim stacked bar */}
+                <div style={{height:6,borderRadius:99,overflow:'hidden',display:'flex',background:'var(--bg3)'}}
+                  onMouseMove={showSalesTooltip}>
+                  {pR>0&&<div style={{width:`${pR}%`,background:'#3fb950',transition:'width .5s'}}/>}
+                  {pA>0&&<div style={{width:`${pA}%`,background:'#00bcd4',transition:'width .5s'}}/>}
+                  {pW>0&&<div style={{width:`${pW}%`,background:'#d29922',transition:'width .5s'}}/>}
+                  {pL>0&&<div style={{width:`${pL}%`,background:'#f85149',transition:'width .5s'}}/>}
+                  {pO>0&&<div style={{width:`${pO}%`,background:'#484f58',transition:'width .5s'}}/>}
+                </div>
+              </div>;
+            })}
+          </>}
       </div>}
 
       {/* Bank tab */}
-      {tab==='bank' && <div style={{display:'grid',gap:14}}>
-        {/* Tooltip overlay */}
-        {tooltip && <div style={{position:'fixed',left:tooltip.x+12,top:tooltip.y-8,background:'rgba(13,17,23,.96)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',zIndex:9000,pointerEvents:'none',boxShadow:'0 8px 24px rgba(0,0,0,.5)',minWidth:190,fontSize:12}}>
-          <div style={{fontWeight:700,marginBottom:6,fontSize:13,color:'var(--text)'}}>{tooltip.src}</div>
-          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:3}}><span style={{color:l.color}}>{l.icon} {l.label}</span><span style={{fontWeight:700,color:l.color}}>{l.val} เคส ({l.pct}%)</span></div>)}
-          <div style={{borderTop:'1px solid var(--border)',marginTop:6,paddingTop:6,color:'var(--text3)'}}>รวม {tooltip.total} เคส · Approve Rate <span style={{color:tooltip.wr>=50?'var(--green)':tooltip.wr>=25?'var(--yellow)':'var(--red)',fontWeight:700}}>{tooltip.wr}%</span></div>
-        </div>}
-        <div className="card">
-          <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>🏦 ธนาคาร — จบ / ยังดำเนินการ / ไม่จบ</div>
-          <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:14,fontSize:12}}>
-            {[['🟢','ปล่อยรถแล้ว','#3fb950'],['🔵','อนุมัติรับรถ','#00bcd4'],['🟡','รอผล/รอเซ็น','#d29922'],['🔴','ปิดเคส','#f85149'],['⬜','อื่น ๆ','#6e7681']].map(([icon,label,color])=>
-              <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
-                <div style={{width:12,height:12,borderRadius:3,background:color,flexShrink:0}}/>
-                <span style={{color:'var(--text2)'}}>{label}</span>
-              </div>)}
+      {tab==='bank' && <div style={{display:'grid',gap:10}}>
+        {/* Elegant Tooltip */}
+        {tooltip && <div style={{position:'fixed',left:Math.min(tooltip.x+16,window.innerWidth-240),top:tooltip.y-10,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:'12px 16px',zIndex:9000,pointerEvents:'none',boxShadow:'0 16px 40px rgba(0,0,0,.6)',minWidth:210,fontSize:12,backdropFilter:'blur(8px)'}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:8,paddingBottom:6,borderBottom:'1px solid var(--border)',color:'var(--text)'}}>{tooltip.src}</div>
+          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+            <div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:8,height:8,borderRadius:50,background:l.color,flexShrink:0}}/><span style={{color:'var(--text2)'}}>{l.label}</span></div>
+            <span style={{fontWeight:700,color:l.color}}>{l.val} <span style={{fontWeight:400,color:'var(--text3)'}}>({l.pct}%)</span></span>
+          </div>)}
+          <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--border)',display:'flex',justifyContent:'space-between'}}>
+            <span style={{color:'var(--text3)',fontSize:11}}>ทั้งหมด {tooltip.total} เคส</span>
+            <span style={{fontWeight:700,fontSize:12,color:tooltip.wr>=50?'#3fb950':tooltip.wr>=25?'#d29922':'#f85149'}}>Win {tooltip.wr}%</span>
           </div>
-          {Object.entries(stats.byBank).sort((a,b)=>b[1].total-a[1].total).map(([bk,d])=>{
-            const total = d.total||1;
-            const pR=Math.round(d.released/total*100);
-            const pA=Math.round(d.approved/total*100);
-            const pW=Math.round(d.waiting/total*100);
-            const pL=Math.round(d.lost/total*100);
-            const pO=Math.max(0,100-pR-pA-pW-pL);
-            const other=d.total-d.released-d.approved-d.waiting-d.lost;
-            const wr=Math.round(d.released/total*100);
+        </div>}
 
-            function showBankTip(e){
-              setTooltip({
-                x:e.clientX, y:e.clientY, src:bk, total:d.total, wr,
-                lines:[
-                  {icon:'🟢',label:'ปล่อยรถแล้ว (จบ)',val:d.released,pct:pR,color:'#3fb950'},
-                  {icon:'🔵',label:'อนุมัติรับรถ',val:d.approved,pct:pA,color:'#00bcd4'},
-                  {icon:'🟡',label:'รอผล/รอเซ็น',val:d.waiting,pct:pW,color:'#d29922'},
-                  {icon:'🔴',label:'ปิดเคส (ไม่จบ)',val:d.lost,pct:pL,color:'#f85149'},
-                  {icon:'⬜',label:'อื่น ๆ',val:other,pct:pO,color:'#6e7681'},
-                ].filter(l=>l.val>0)
-              });
-            }
-
-            return <div key={bk} style={{marginBottom:14}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
-                <span style={{fontWeight:700,fontSize:13}}>{bk}</span>
-                <span style={{fontSize:11,color:'var(--text3)'}}>ทั้งหมด {d.total} เคส</span>
-              </div>
-              <div
-                style={{height:30,borderRadius:8,overflow:'hidden',display:'flex',width:'100%',background:'#6e768122',cursor:'pointer'}}
-                onMouseMove={showBankTip}
-                onMouseLeave={()=>setTooltip(null)}
-              >
-                {pR>0&&<div style={{width:`${pR}%`,background:'#3fb950',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pR>=8?d.released:''}</div>}
-                {pA>0&&<div style={{width:`${pA}%`,background:'#00bcd4',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pA>=8?d.approved:''}</div>}
-                {pW>0&&<div style={{width:`${pW}%`,background:'#d29922',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pW>=8?d.waiting:''}</div>}
-                {pL>0&&<div style={{width:`${pL}%`,background:'#f85149',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pL>=8?d.lost:''}</div>}
-                {pO>0&&<div style={{width:`${pO}%`,background:'#6e7681',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#fff',transition:'width .4s'}}>{pO>=10?other:''}</div>}
-              </div>
-              <div style={{display:'flex',gap:10,marginTop:4,flexWrap:'wrap'}}>
-                {d.released>0&&<span style={{fontSize:11,color:'#3fb950',fontWeight:600}}>✅ จบ {d.released}</span>}
-                {d.approved>0&&<span style={{fontSize:11,color:'#00bcd4',fontWeight:600}}>🔵 อนุมัติ {d.approved}</span>}
-                {d.waiting>0&&<span style={{fontSize:11,color:'#d29922',fontWeight:600}}>⏳ รอผล {d.waiting}</span>}
-                {d.lost>0&&<span style={{fontSize:11,color:'#f85149',fontWeight:600}}>❌ ไม่จบ {d.lost}</span>}
-                {other>0&&<span style={{fontSize:11,color:'var(--text3)'}}>อื่น ๆ {other}</span>}
-              </div>
-            </div>;
-          })}
+        {/* Legend pill row */}
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:4}}>
+          {[['#3fb950','ปล่อยรถแล้ว'],['#00bcd4','อนุมัติ'],['#d29922','รอผล'],['#f85149','ปิดเคส'],['#484f58','อื่น ๆ']].map(([c,l])=>
+            <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text3)'}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background:c}}/>{l}
+            </div>)}
         </div>
+
+        {Object.entries(stats.byBank).sort((a,b)=>b[1].total-a[1].total).map(([bk,d])=>{
+          const total=d.total||1;
+          const pR=Math.round(d.released/total*100);
+          const pA=Math.round(d.approved/total*100);
+          const pW=Math.round(d.waiting/total*100);
+          const pL=Math.round(d.lost/total*100);
+          const pO=Math.max(0,100-pR-pA-pW-pL);
+          const other=d.total-d.released-d.approved-d.waiting-d.lost;
+          const wr=Math.round(d.released/total*100);
+
+          function showBankTip(e){setTooltip({x:e.clientX,y:e.clientY,src:bk,total:d.total,wr,lines:[
+            {label:'ปล่อยรถแล้ว',val:d.released,pct:pR,color:'#3fb950'},
+            {label:'อนุมัติรับรถ',val:d.approved,pct:pA,color:'#00bcd4'},
+            {label:'รอผล/รอเซ็น',val:d.waiting,pct:pW,color:'#d29922'},
+            {label:'ปิดเคส',val:d.lost,pct:pL,color:'#f85149'},
+            {label:'อื่น ๆ',val:other,pct:pO,color:'#484f58'},
+          ].filter(l=>l.val>0)});}
+
+          return <div key={bk} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',cursor:'default',transition:'border-color .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(88,166,255,.35)'}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';setTooltip(null);}}>
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,letterSpacing:'-.2px'}}>{bk}</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>
+                  {[d.released&&`✅ ${d.released}`,d.approved&&`🔵 ${d.approved}`,d.waiting&&`⏳ ${d.waiting}`,d.lost&&`❌ ${d.lost}`].filter(Boolean).join('  ·  ')}
+                </div>
+              </div>
+              <div style={{textAlign:'right',flexShrink:0}}>
+                <div style={{fontSize:16,fontWeight:800,color:wr>=50?'#3fb950':wr>=25?'#d29922':'#f85149',lineHeight:1}}>{d.total}</div>
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>เคส</div>
+              </div>
+            </div>
+            {/* Slim stacked bar */}
+            <div style={{height:6,borderRadius:99,overflow:'hidden',display:'flex',background:'var(--bg3)'}}
+              onMouseMove={showBankTip}>
+              {pR>0&&<div style={{width:`${pR}%`,background:'#3fb950',transition:'width .5s'}}/>}
+              {pA>0&&<div style={{width:`${pA}%`,background:'#00bcd4',transition:'width .5s'}}/>}
+              {pW>0&&<div style={{width:`${pW}%`,background:'#d29922',transition:'width .5s'}}/>}
+              {pL>0&&<div style={{width:`${pL}%`,background:'#f85149',transition:'width .5s'}}/>}
+              {pO>0&&<div style={{width:`${pO}%`,background:'#484f58',transition:'width .5s'}}/>}
+            </div>
+            {/* Percentage labels */}
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+              <span style={{fontSize:10,color:'#3fb950',fontWeight:600}}>{pR>0?`${pR}% จบ`:''}</span>
+              <span style={{fontSize:10,color:wr>=50?'#3fb950':wr>=25?'#d29922':'#f85149',fontWeight:700}}>Win Rate {wr}%</span>
+            </div>
+          </div>;
+        })}
       </div>}
 
       {/* Source tab — Stacked funnel */}
@@ -2023,17 +2027,21 @@ function AdminDailyReport() {
         {/* Tooltip overlay */}
         {tooltip && <div style={{position:'fixed',left:tooltip.x+12,top:tooltip.y-8,background:'rgba(13,17,23,.96)',border:'1px solid var(--border)',borderRadius:10,padding:'10px 14px',zIndex:9000,pointerEvents:'none',boxShadow:'0 8px 24px rgba(0,0,0,.5)',minWidth:180,fontSize:12}}>
           <div style={{fontWeight:700,marginBottom:6,fontSize:13,color:'var(--text)'}}>{tooltip.src}</div>
-          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:3}}><span style={{color:l.color}}>{l.icon} {l.label}</span><span style={{fontWeight:700,color:l.color}}>{l.val} คัน ({l.pct}%)</span></div>)}
-          <div style={{borderTop:'1px solid var(--border)',marginTop:6,paddingTop:6,color:'var(--text3)'}}>รวม {tooltip.total} คัน · Win Rate <span style={{color:tooltip.wr>=50?'var(--green)':tooltip.wr>=25?'var(--yellow)':'var(--red)',fontWeight:700}}>{tooltip.wr}%</span></div>
+          {tooltip.lines.map((l,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+            <div style={{display:'flex',alignItems:'center',gap:6}}><div style={{width:8,height:8,borderRadius:50,background:l.color,flexShrink:0}}/><span style={{color:'var(--text2)'}}>{l.label}</span></div>
+            <span style={{fontWeight:700,color:l.color}}>{l.val} <span style={{fontWeight:400,color:'var(--text3)'}}>({l.pct}%)</span></span>
+          </div>)}
+          <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--border)',display:'flex',justifyContent:'space-between'}}>
+            <span style={{color:'var(--text3)',fontSize:11}}>ทั้งหมด {tooltip.total} คัน</span>
+            <span style={{fontWeight:700,fontSize:12,color:tooltip.wr>=50?'#3fb950':tooltip.wr>=25?'#d29922':'#f85149'}}>Win {tooltip.wr}%</span>
+          </div>
         </div>}
 
-        <div className="card">
-          <div style={{fontWeight:700,fontSize:14,marginBottom:6}}>📌 แหล่งที่มา — ปล่อย / อนุมัติ / รอผล / ไม่จบ</div>
-          <div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:14,fontSize:12}}>
-            {[['🟢','ปล่อยรถแล้ว','#3fb950'],['🔵','อนุมัติรับรถ','#00bcd4'],['🟡','รอผล/รอเซ็น','#d29922'],['🔴','ปิดเคส','#f85149'],['⬜','อื่น ๆ','#6e7681']].map(([icon,label,color])=>
-              <div key={label} style={{display:'flex',alignItems:'center',gap:5}}>
-                <div style={{width:12,height:12,borderRadius:3,background:color,flexShrink:0}}/>
-                <span style={{color:'var(--text2)'}}>{label}</span>
+        <div style={{display:'grid',gap:10}}>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:2}}>
+            {[['#3fb950','ปล่อยรถแล้ว'],['#00bcd4','อนุมัติ'],['#d29922','รอผล'],['#f85149','ปิดเคส'],['#484f58','อื่น ๆ']].map(([c,l])=>
+              <div key={l} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text3)'}}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:c}}/>{l}
               </div>)}
           </div>
           {Object.entries(stats.bySourceDetail).sort((a,b)=>b[1].total-a[1].total).map(([src,d])=>{
@@ -2050,39 +2058,41 @@ function AdminDailyReport() {
               setTooltip({
                 x: e.clientX, y: e.clientY, src, total: d.total, wr,
                 lines:[
-                  {icon:'🟢',label:'ปล่อยรถแล้ว',val:d.released,pct:pReleased,color:'#3fb950'},
-                  {icon:'🔵',label:'อนุมัติรับรถ',val:d.approved,pct:pApproved,color:'#00bcd4'},
-                  {icon:'🟡',label:'รอผล/รอเซ็น',val:d.waiting,pct:pWaiting,color:'#d29922'},
-                  {icon:'🔴',label:'ปิดเคส',val:d.lost,pct:pLost,color:'#f85149'},
-                  {icon:'⬜',label:'อื่น ๆ (จอง/รอ)',val:other,pct:pOther,color:'#6e7681'},
+                  {label:'ปล่อยรถแล้ว',val:d.released,pct:pReleased,color:'#3fb950'},
+                  {label:'อนุมัติรับรถ',val:d.approved,pct:pApproved,color:'#00bcd4'},
+                  {label:'รอผล/รอเซ็น',val:d.waiting,pct:pWaiting,color:'#d29922'},
+                  {label:'ปิดเคส',val:d.lost,pct:pLost,color:'#f85149'},
+                  {label:'อื่น ๆ',val:other,pct:pOther,color:'#484f58'},
                 ].filter(l=>l.val>0)
               });
             }
 
-            return <div key={src} style={{marginBottom:14}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
-                <span style={{fontWeight:700,fontSize:13}}>{src}</span>
-                <span style={{fontSize:11,color:'var(--text3)'}}>ทั้งหมด {d.total} คัน</span>
+            return <div key={src} style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',transition:'border-color .15s'}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(88,166,255,.35)'}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';setTooltip(null);}}>
+              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:14}}>{src}</div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>
+                    {[d.released&&`✅ ${d.released}`,d.approved&&`🔵 ${d.approved}`,d.waiting&&`⏳ ${d.waiting}`,d.lost&&`❌ ${d.lost}`].filter(Boolean).join('  ·  ')}
+                  </div>
+                </div>
+                <div style={{textAlign:'right',flexShrink:0}}>
+                  <div style={{fontSize:16,fontWeight:800,color:wr>=50?'#3fb950':wr>=25?'#d29922':'#f85149',lineHeight:1}}>{d.total}</div>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>คัน</div>
+                </div>
               </div>
-              {/* Stacked bar with hover tooltip */}
-              <div
-                style={{height:30,borderRadius:8,overflow:'hidden',display:'flex',width:'100%',background:'#6e768122',cursor:'pointer'}}
-                onMouseMove={showTip}
-                onMouseLeave={()=>setTooltip(null)}
-              >
-                {pReleased>0 && <div style={{width:`${pReleased}%`,background:'#3fb950',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pReleased>=8?`${d.released}`:''}</div>}
-                {pApproved>0 && <div style={{width:`${pApproved}%`,background:'#00bcd4',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pApproved>=8?`${d.approved}`:''}</div>}
-                {pWaiting>0  && <div style={{width:`${pWaiting}%`,background:'#d29922',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pWaiting>=8?`${d.waiting}`:''}</div>}
-                {pLost>0     && <div style={{width:`${pLost}%`,background:'#f85149',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:'#fff',transition:'width .4s'}}>{pLost>=8?`${d.lost}`:''}</div>}
-                {pOther>0    && <div style={{width:`${pOther}%`,background:'#6e7681',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:'#fff',transition:'width .4s'}}/>}
+              <div style={{height:6,borderRadius:99,overflow:'hidden',display:'flex',background:'var(--bg3)'}}
+                onMouseMove={showTip}>
+                {pReleased>0&&<div style={{width:`${pReleased}%`,background:'#3fb950',transition:'width .5s'}}/>}
+                {pApproved>0&&<div style={{width:`${pApproved}%`,background:'#00bcd4',transition:'width .5s'}}/>}
+                {pWaiting>0&&<div style={{width:`${pWaiting}%`,background:'#d29922',transition:'width .5s'}}/>}
+                {pLost>0&&<div style={{width:`${pLost}%`,background:'#f85149',transition:'width .5s'}}/>}
+                {pOther>0&&<div style={{width:`${pOther}%`,background:'#484f58',transition:'width .5s'}}/>}
               </div>
-              {/* Label row */}
-              <div style={{display:'flex',gap:10,marginTop:4,flexWrap:'wrap'}}>
-                {d.released>0&&<span style={{fontSize:11,color:'#3fb950',fontWeight:600}}>✅ ปล่อย {d.released}</span>}
-                {d.approved>0&&<span style={{fontSize:11,color:'#00bcd4',fontWeight:600}}>🔵 อนุมัติ {d.approved}</span>}
-                {d.waiting>0 &&<span style={{fontSize:11,color:'#d29922',fontWeight:600}}>⏳ รอผล {d.waiting}</span>}
-                {d.lost>0    &&<span style={{fontSize:11,color:'#f85149',fontWeight:600}}>❌ ปิดเคส {d.lost}</span>}
-                {other>0&&<span style={{fontSize:11,color:'var(--text3)'}}>อื่น ๆ {other}</span>}
+              <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+                <span style={{fontSize:10,color:'#3fb950'}}>{pReleased>0?`${pReleased}% ปล่อย`:''}</span>
+                <span style={{fontSize:10,fontWeight:700,color:wr>=50?'#3fb950':wr>=25?'#d29922':'#f85149'}}>Win {wr}%</span>
               </div>
             </div>;
           })}
